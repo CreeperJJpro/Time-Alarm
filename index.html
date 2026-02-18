@@ -1,0 +1,262 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Smart Alarm Hub</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600;800&display=swap');
+        
+        body {
+            font-family: 'Inter', sans-serif;
+            background: radial-gradient(circle at top left, #1a1a2e, #16213e);
+            min-height: 100vh;
+            color: white;
+        }
+
+        .glass {
+            background: rgba(255, 255, 255, 0.05);
+            backdrop-filter: blur(12px);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 24px;
+        }
+
+        .alarm-card:hover {
+            border-color: rgba(96, 165, 250, 0.5);
+            transform: translateY(-2px);
+            transition: all 0.3s ease;
+        }
+
+        .day-input.active {
+            background-color: #3b82f6;
+            border-color: #60a5fa;
+            color: white;
+            box-shadow: 0 0 10px rgba(59, 130, 246, 0.5);
+        }
+    </style>
+</head>
+<body class="p-4 md:p-8">
+
+    <div class="max-w-2xl mx-auto">
+        <header class="text-center mb-10">
+            <h1 class="text-4xl font-extrabold mb-2 bg-gradient-to-r from-blue-400 to-purple-500 bg-clip-text text-transparent">
+                Alarm Hub
+            </h1>
+            <div id="live-clock" class="text-6xl font-light tracking-widest mt-4">00:00:00 AM</div>
+            <div id="live-date" class="text-blue-400 opacity-80 mt-2 uppercase tracking-widest text-sm">--</div>
+        </header>
+
+        <div id="notif-banner" class="glass p-4 mb-6 flex justify-between items-center border-blue-500/30">
+            <p class="text-sm">Enable notifications to receive alerts when the tab is open.</p>
+            <button onclick="requestPermission()" class="bg-blue-600 hover:bg-blue-500 px-4 py-2 rounded-lg text-xs font-bold transition">Enable</button>
+        </div>
+
+        <section class="glass p-6 mb-8">
+            <h2 class="text-xl font-semibold mb-4 flex items-center gap-2">
+                <span>⏰</span> New Alarm
+            </h2>
+            <div class="flex flex-col md:flex-row gap-4 mb-4">
+                <input type="time" id="alarm-time" class="bg-white/10 border border-white/20 rounded-xl p-3 flex-1 text-white focus:outline-none focus:ring-2 focus:ring-blue-500">
+                <div class="flex gap-1 overflow-x-auto pb-2 md:pb-0">
+                    <button class="day-input p-2 w-10 h-10 rounded-full border border-white/20 text-xs transition-colors" data-day="1">M</button>
+                    <button class="day-input p-2 w-10 h-10 rounded-full border border-white/20 text-xs transition-colors" data-day="2">T</button>
+                    <button class="day-input p-2 w-10 h-10 rounded-full border border-white/20 text-xs transition-colors" data-day="3">W</button>
+                    <button class="day-input p-2 w-10 h-10 rounded-full border border-white/20 text-xs transition-colors" data-day="4">T</button>
+                    <button class="day-input p-2 w-10 h-10 rounded-full border border-white/20 text-xs transition-colors" data-day="5">F</button>
+                    <button class="day-input p-2 w-10 h-10 rounded-full border border-white/20 text-xs transition-colors" data-day="6">S</button>
+                    <button class="day-input p-2 w-10 h-10 rounded-full border border-white/20 text-xs transition-colors" data-day="0">S</button>
+                </div>
+            </div>
+            <div class="flex items-center gap-4 mb-6">
+                <label class="flex items-center gap-2 cursor-pointer">
+                    <input type="checkbox" id="alarm-repeat" class="w-4 h-4 rounded border-white/20 bg-white/10">
+                    <span class="text-sm text-gray-300">Repeat Weekly</span>
+                </label>
+            </div>
+            <button onclick="addAlarm()" class="w-full bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 py-3 rounded-xl font-bold transition shadow-lg">Set Alarm</button>
+        </section>
+
+        <div id="alarm-list" class="space-y-4"></div>
+    </div>
+
+    <audio id="alarm-sound" loop>
+        <source src="https://assets.mixkit.co/sfx/preview/mixkit-alarm-digital-clock-beep-989.mp3" type="audio/mpeg">
+    </audio>
+
+    <script>
+        let alarms = JSON.parse(localStorage.getItem('alarms')) || [];
+        const dayInputs = document.querySelectorAll('.day-input');
+        let selectedDays = [];
+
+        function updateClock() {
+            const now = new Date();
+            const timeOptions = { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: true };
+            document.getElementById('live-clock').textContent = now.toLocaleTimeString('en-US', timeOptions);
+            document.getElementById('live-date').textContent = now.toLocaleDateString('en-US', { weekday: 'long', month: 'short', day: 'numeric' });
+            checkAlarms(now);
+        }
+
+        setInterval(updateClock, 1000);
+
+        dayInputs.forEach(btn => {
+            btn.addEventListener('click', () => {
+                const day = parseInt(btn.dataset.day);
+                if (selectedDays.includes(day)) {
+                    selectedDays = selectedDays.filter(d => d !== day);
+                    btn.classList.remove('active');
+                } else {
+                    selectedDays.push(day);
+                    btn.classList.add('active');
+                }
+            });
+        });
+
+        function requestPermission() {
+            Notification.requestPermission().then(permission => {
+                if (permission === 'granted') document.getElementById('notif-banner').style.display = 'none';
+            });
+        }
+
+        function addAlarm() {
+            const timeVal = document.getElementById('alarm-time').value;
+            const repeat = document.getElementById('alarm-repeat').checked;
+            if (!timeVal) return;
+
+            const now = new Date();
+            const [hours, minutes] = timeVal.split(':').map(Number);
+            const alarmDate = new Date();
+            alarmDate.setHours(hours, minutes, 0, 0);
+
+            // Logic for "next occurring time": if time passed today, set for tomorrow
+            const isOneTime = selectedDays.length === 0;
+            let targetTimestamp = alarmDate.getTime();
+            
+            if (isOneTime && alarmDate <= now) {
+                targetTimestamp += 24 * 60 * 60 * 1000;
+            }
+
+            const newAlarm = {
+                id: Date.now(),
+                time: timeVal,
+                days: [...selectedDays],
+                repeat: repeat,
+                active: true,
+                triggeredToday: false,
+                isOneTime: isOneTime,
+                targetTimestamp: targetTimestamp 
+            };
+
+            alarms.push(newAlarm);
+            saveAlarms();
+            renderAlarms();
+            resetForm();
+        }
+
+        function checkAlarms(now) {
+            const currentDay = now.getDay();
+            const currentTime = now.getHours().toString().padStart(2, '0') + ':' + now.getMinutes().toString().padStart(2, '0');
+            const currentSeconds = now.getSeconds();
+
+            alarms.forEach(alarm => {
+                if (!alarm.active) return;
+
+                if (alarm.isOneTime) {
+                    // Check if current time has reached or passed the specific target timestamp
+                    if (now.getTime() >= alarm.targetTimestamp && !alarm.triggeredToday) {
+                        triggerAlarm(alarm);
+                        alarm.triggeredToday = true;
+                    }
+                } else if (alarm.days.includes(currentDay)) {
+                    if (alarm.time === currentTime && currentSeconds === 0 && !alarm.triggeredToday) {
+                        triggerAlarm(alarm);
+                        alarm.triggeredToday = true;
+                    }
+                }
+                
+                if (currentTime === "00:00" && currentSeconds === 0) {
+                    alarm.triggeredToday = false;
+                }
+            });
+        }
+
+        function triggerAlarm(alarm) {
+            const audio = document.getElementById('alarm-sound');
+            audio.play();
+
+            if (Notification.permission === "granted") {
+                new Notification("⏰ Alarm!", { body: `It's time!` });
+            }
+
+            setTimeout(() => {
+                if (confirm(`Alarm ringing! Stop?`)) {
+                    audio.pause();
+                    audio.currentTime = 0;
+                    
+                    if (alarm.isOneTime) {
+                        deleteAlarm(alarm.id);
+                    } else if (!alarm.repeat) {
+                        alarm.active = false;
+                        saveAlarms();
+                        renderAlarms();
+                    }
+                }
+            }, 100);
+        }
+
+        function deleteAlarm(id) {
+            alarms = alarms.filter(a => a.id !== id);
+            saveAlarms();
+            renderAlarms();
+        }
+
+        function toggleAlarm(id) {
+            const alarm = alarms.find(a => a.id === id);
+            if (alarm) alarm.active = !alarm.active;
+            saveAlarms();
+            renderAlarms();
+        }
+
+        function saveAlarms() {
+            localStorage.setItem('alarms', JSON.stringify(alarms));
+        }
+
+        function resetForm() {
+            document.getElementById('alarm-time').value = '';
+            document.getElementById('alarm-repeat').checked = false;
+            selectedDays = [];
+            dayInputs.forEach(btn => btn.classList.remove('active'));
+        }
+
+        function renderAlarms() {
+            const list = document.getElementById('alarm-list');
+            list.innerHTML = alarms.length === 0 ? '<p class="text-center text-gray-500 py-10">No alarms set.</p>' : '';
+            
+            alarms.forEach(alarm => {
+                const dayLabels = ['S', 'M', 'T', 'W', 'T', 'F', 'S'];
+                let daysStr = alarm.isOneTime ? 'Once' : alarm.days.map(d => dayLabels[d]).join(', ');
+                
+                const [h, m] = alarm.time.split(':');
+                const displayTime = new Date(0,0,0, h, m).toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true });
+
+                const card = document.createElement('div');
+                card.className = `alarm-card glass p-5 flex justify-between items-center transition ${!alarm.active ? 'opacity-50' : ''}`;
+                card.innerHTML = `
+                    <div>
+                        <div class="text-2xl font-bold">${displayTime}</div>
+                        <div class="text-xs text-blue-400 mt-1 uppercase tracking-wider">${daysStr}</div>
+                    </div>
+                    <div class="flex items-center gap-4">
+                        <button onclick="toggleAlarm(${alarm.id})" class="p-2 rounded-lg bg-white/10 hover:bg-white/20">${alarm.active ? '🔔' : '🔕'}</button>
+                        <button onclick="deleteAlarm(${alarm.id})" class="p-2 rounded-lg bg-red-500/20 hover:bg-red-500/40 text-red-400">🗑️</button>
+                    </div>
+                `;
+                list.appendChild(card);
+            });
+        }
+
+        renderAlarms();
+        if (Notification.permission === 'granted') document.getElementById('notif-banner').style.display = 'none';
+    </script>
+</body>
+</html>
