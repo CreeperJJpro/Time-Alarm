@@ -48,7 +48,7 @@
         </header>
 
         <div id="notif-banner" class="glass p-4 mb-6 flex justify-between items-center border-blue-500/30">
-            <p class="text-sm">Enable notifications to receive alerts when the tab is open.</p>
+            <p class="text-sm">Enable notifications to receive alerts even in the background.</p>
             <button onclick="requestPermission()" class="bg-blue-600 hover:bg-blue-500 px-4 py-2 rounded-lg text-xs font-bold transition">Enable</button>
         </div>
 
@@ -80,7 +80,7 @@
         <div id="alarm-list" class="space-y-4"></div>
     </div>
 
-    <audio id="alarm-sound" loop>
+    <audio id="alarm-sound" preload="auto" loop>
         <source src="https://assets.mixkit.co/sfx/preview/mixkit-alarm-digital-clock-beep-989.mp3" type="audio/mpeg">
     </audio>
 
@@ -88,6 +88,27 @@
         let alarms = JSON.parse(localStorage.getItem('alarms')) || [];
         const dayInputs = document.querySelectorAll('.day-input');
         let selectedDays = [];
+        let swRegistration = null;
+
+        // Service Worker Registration for background notifications
+        if ('serviceWorker' in navigator) {
+            const swCode = `
+                self.addEventListener('push', function(event) {
+                    const data = event.data.json();
+                    self.registration.showNotification(data.title, {
+                        body: data.body,
+                        icon: 'https://cdn-icons-png.flaticon.com/512/182/182444.png'
+                    });
+                });
+            `;
+            const blob = new Blob([swCode], { type: 'application/javascript' });
+            const swUrl = URL.createObjectURL(blob);
+            
+            navigator.serviceWorker.register(swUrl).then(reg => {
+                swRegistration = reg;
+                console.log('Service Worker Registered');
+            });
+        }
 
         function updateClock() {
             const now = new Date();
@@ -114,7 +135,16 @@
 
         function requestPermission() {
             Notification.requestPermission().then(permission => {
-                if (permission === 'granted') document.getElementById('notif-banner').style.display = 'none';
+                if (permission === 'granted') {
+                    document.getElementById('notif-banner').style.display = 'none';
+                    // Show a test notification
+                    if (swRegistration) {
+                        swRegistration.showNotification("Notifications Enabled", {
+                            body: "You will now receive alarm alerts!",
+                            icon: "https://cdn-icons-png.flaticon.com/512/182/182444.png"
+                        });
+                    }
+                }
             });
         }
 
@@ -128,7 +158,6 @@
             const alarmDate = new Date();
             alarmDate.setHours(hours, minutes, 0, 0);
 
-            // Logic for "next occurring time": if time passed today, set for tomorrow
             const isOneTime = selectedDays.length === 0;
             let targetTimestamp = alarmDate.getTime();
             
@@ -162,7 +191,6 @@
                 if (!alarm.active) return;
 
                 if (alarm.isOneTime) {
-                    // Check if current time has reached or passed the specific target timestamp
                     if (now.getTime() >= alarm.targetTimestamp && !alarm.triggeredToday) {
                         triggerAlarm(alarm);
                         alarm.triggeredToday = true;
@@ -182,14 +210,27 @@
 
         function triggerAlarm(alarm) {
             const audio = document.getElementById('alarm-sound');
-            audio.play();
+            // Play audio (Note: Browser might block this if user hasn't interacted)
+            audio.play().catch(e => console.log("Audio playback deferred: " + e));
+
+            const title = "⏰ Alarm Hub";
+            const options = {
+                body: `Your alarm for ${alarm.time} is ringing!`,
+                icon: 'https://cdn-icons-png.flaticon.com/512/182/182444.png',
+                requireInteraction: true,
+                vibrate: [200, 100, 200]
+            };
 
             if (Notification.permission === "granted") {
-                new Notification("⏰ Alarm!", { body: `It's time!` });
+                if (swRegistration) {
+                    swRegistration.showNotification(title, options);
+                } else {
+                    new Notification(title, options);
+                }
             }
 
             setTimeout(() => {
-                if (confirm(`Alarm ringing! Stop?`)) {
+                if (confirm(`Alarm ringing for ${alarm.time}! Stop?`)) {
                     audio.pause();
                     audio.currentTime = 0;
                     
